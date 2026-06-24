@@ -54,9 +54,8 @@ tqdm
 fastapi
 uvicorn[standard]
 websockets
-livekit
-livekit-api
-livekit-rtc
+livekit                # realtime SDK; provides `from livekit import rtc` (no separate livekit-rtc pkg)
+livekit-api            # provides `from livekit import api` (tokens / server API)
 openai                 # GPT (LLM) + TTS + Whisper API
 pydantic
 python-multipart
