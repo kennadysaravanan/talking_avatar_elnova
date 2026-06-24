@@ -1,0 +1,16 @@
+This directory vendors source code from the Alibaba LiveAvatar project:
+
+    https://github.com/Alibaba-Quark/LiveAvatar
+
+Copyright 2024-2025 The Alibaba Wan Team Authors.
+Licensed under the Apache License, Version 2.0 (see avatar/LICENSE).
+
+The subtree under avatar/liveavatar/ is copied VERBATIM and PINNED (not a submodule), per the
+project decision to own and pin the inference code. Our additions live alongside it:
+    avatar/avatar_worker.py   — resident streaming driver (NEW; implements get_audio_callback,
+                                drives the block-wise generator, emits frames over IPC)
+    avatar/idle.py            — idle audio + idle frame ring (NEW)
+    avatar/blend.py           — idle<->talk crossfade (NEW)
+    avatar/ipc_worker.py      — ZeroMQ transport for rank 4 (NEW)
+
+Modifications to vendored files, if any, are noted inline with a "# LIVEAVATAR-FORK:" comment.

@@ -1,0 +1,4 @@
+# PLACEHOLDER — replace with the real freeze captured ON THE POD after a clean install:
+#     pip freeze > requirements-lock.txt    (then commit)
+# This file is intentionally empty of versions until the first successful pod install, so we do
+# not ship guessed transitive pins that differ from what actually resolves on cu128/H100.

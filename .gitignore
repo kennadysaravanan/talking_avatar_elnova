@@ -1,0 +1,15 @@
+ckpt/
+output/
+*.mp4
+*.wav
+!avatar/liveavatar_examples/*.wav
+__pycache__/
+*.pyc
+.env
+node_modules/
+web/dist/
+bench_block.metrics
+*.metrics
+.DS_Store
+.venv*/
+.venv-localcheck/
