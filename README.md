@@ -101,7 +101,7 @@ All env vars (endpoints, idle-audio mode, LiveKit, OpenAI) are documented in
 ### Acceptance results (fill in after pod run)
 | Test | Target | Actual |
 |---|---|---|
-| 0. Real-time gate (p50/block) | < 480 ms | _TBD_ |
+| 0. Real-time gate (p50/block) | < 480 ms | **PASS** — rank4 p50 **396.6 ms**, p95 **453.0 ms** (5×H100 SXM, fp8, compile, 50 blocks) |
 | 1. Warm-up to first idle frame | few s (warm) | _TBD_ |
 | 2. Text → first talk frame | report median | _TBD_ |
 | 3. Sustained talk FPS | ≈ 25 | _TBD_ |
