@@ -69,18 +69,26 @@ class LiveKitPublisher:
             .to_jwt()
         )
 
-    async def start(self, width: int, height: int) -> None:
-        self._width, self._height = width, height
+    async def start(self, width: int = 0, height: int = 0) -> None:
+        # width/height are only hints — the VideoSource/track are created lazily in the publish
+        # loop from the FIRST actual frame's dimensions. The model's real output size follows the
+        # reference image aspect ratio (NOT the --size config), so hardcoding dims shears the image.
         self._room = rtc.Room()
         await self._room.connect(os.environ["LIVEKIT_URL"], self._token(self._room_name, self._identity))
-        self._source = rtc.VideoSource(width, height)
+        self._tasks.append(asyncio.create_task(self._ingest_loop(), name="lk-ingest"))
+        self._tasks.append(asyncio.create_task(self._publish_loop(), name="lk-publish"))
+
+    async def _ensure_source(self, w: int, h: int) -> None:
+        """Create the VideoSource + track sized to the ACTUAL frame, and publish it."""
+        if self._source is not None:
+            return
+        self._width, self._height = w, h
+        self._source = rtc.VideoSource(w, h)
         track = rtc.LocalVideoTrack.create_video_track("avatar", self._source)
         await self._room.local_participant.publish_track(
             track, rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_CAMERA)
         )
-        logger.info("published avatar track to room=%s (%dx%d)", self._room_name, width, height)
-        self._tasks.append(asyncio.create_task(self._ingest_loop(), name="lk-ingest"))
-        self._tasks.append(asyncio.create_task(self._publish_loop(), name="lk-publish"))
+        logger.info("published avatar track to room=%s (actual %dx%d)", self._room_name, w, h)
 
     async def wait_first_frame(self, timeout: float = 120.0) -> bool:
         try:
@@ -114,8 +122,10 @@ class LiveKitPublisher:
             if self._ring:
                 self._last_rgb = self._ring.popleft().rgb
             if self._last_rgb is not None:
+                h, w = self._last_rgb.shape[:2]              # ACTUAL frame dims
+                await self._ensure_source(w, h)             # create source/track on first frame
                 vf = rtc.VideoFrame(
-                    width=self._width, height=self._height,
+                    width=w, height=h,
                     type=rtc.VideoBufferType.RGBA, data=_rgb_to_rgba(self._last_rgb),
                 )
                 self._source.capture_frame(vf)
