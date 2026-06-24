@@ -25,7 +25,7 @@ torchrun --nproc_per_node=5 --master_port="${MASTER_PORT:-29103}" \
   --image "${REF_IMAGE}" \
   --infer_frames 48 --sample_steps 4 --sample_guide_scale 0 --sample_solver euler \
   --num_gpus_dit 4 --enable_vae_parallel --enable_online_decode \
-  --load_lora --lora_path_dmd "${LORA_DIR:-ckpt/LiveAvatar}" --convert_model_dtype --fp8 \
+  --load_lora --lora_path_dmd "${LORA_DIR:-ckpt/LiveAvatar/liveavatar.safetensors}" --convert_model_dtype --fp8 \
   --bench_blocks "${N}"
 
 echo "---- bench result ----"

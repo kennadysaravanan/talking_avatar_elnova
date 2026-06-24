@@ -30,6 +30,6 @@ torchrun --nproc_per_node=5 --master_port="${MASTER_PORT:-29102}" \
   --enable_vae_parallel \
   --enable_online_decode \
   --load_lora \
-  --lora_path_dmd "${LORA_DIR:-ckpt/LiveAvatar}" \
+  --lora_path_dmd "${LORA_DIR:-ckpt/LiveAvatar/liveavatar.safetensors}" \
   --convert_model_dtype \
   --fp8
