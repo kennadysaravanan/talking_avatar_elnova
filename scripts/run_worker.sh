@@ -11,6 +11,10 @@ export NCCL_DEBUG="${NCCL_DEBUG:-WARN}"
 export NCCL_DEBUG_SUBSYS=OFF
 export ENABLE_COMPILE="${ENABLE_COMPILE:-true}"   # first run compiles (slow); subsequent runs fast
 export IDLE_AUDIO_MODE="${IDLE_AUDIO_MODE:-silence}"  # constraint #3: silence-first
+# Persist the torch.compile (inductor) cache on the volume so RESTARTS skip most of the ~8-min
+# compile (drops to seconds once warm). Survives pod terminate/redeploy (volume-backed).
+export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-/workspace/.inductor_cache}"
+export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/workspace/.triton_cache}"
 
 REF_IMAGE="${REF_IMAGE:-avatar/liveavatar_examples/ref.jpg}"
 
