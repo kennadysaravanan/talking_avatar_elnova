@@ -155,19 +155,23 @@ class WorkerIPC:
             return p
 
     # ---------------------------------------------------------------- frames out
-    def push_frame(self, rgb: np.ndarray, kind: str) -> None:
-        """Send one uint8 RGB frame [H,W,3] to the orchestrator. Non-blocking: if the
-        orchestrator is briefly behind, the frame is dropped (better a dropped frame than a
-        stalled GPU ring)."""
+    def push_frame(self, rgb: np.ndarray, kind: str, audio: Optional[np.ndarray] = None) -> None:
+        """Send one uint8 RGB frame [H,W,3] to the orchestrator, optionally with the int16 PCM
+        audio that GENERATED this block (attached to the block's first frame). The orchestrator
+        plays that audio exactly when it publishes this frame -> frame-locked A/V sync.
+        Non-blocking: a dropped frame beats a stalled GPU ring."""
         assert rgb.dtype == np.uint8 and rgb.ndim == 3 and rgb.shape[2] == 3
         h, w, _ = rgb.shape
-        header = json.dumps(
-            {"h": int(h), "w": int(w), "seq": self._frame_seq, "kind": kind, "ts": time.time()}
-        ).encode()
+        header = json.dumps({
+            "h": int(h), "w": int(w), "seq": self._frame_seq, "kind": kind, "ts": time.time(),
+            "asamples": int(audio.shape[0]) if audio is not None else 0,
+        }).encode()
         self._frame_seq += 1
+        parts = [b"FRAME", header, np.ascontiguousarray(rgb).tobytes()]
+        if audio is not None:
+            parts.append(np.ascontiguousarray(audio, dtype="<i2").tobytes())
         try:
-            self._frame_sock.send_multipart([b"FRAME", header, np.ascontiguousarray(rgb).tobytes()],
-                                            flags=zmq.NOBLOCK)
+            self._frame_sock.send_multipart(parts, flags=zmq.NOBLOCK)
         except zmq.Again:
             pass  # orchestrator behind; drop this frame
 

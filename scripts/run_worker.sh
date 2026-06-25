@@ -21,7 +21,7 @@ REF_IMAGE="${REF_IMAGE:-avatar/liveavatar_examples/ref.jpg}"
 torchrun --nproc_per_node=5 --master_port="${MASTER_PORT:-29102}" \
   avatar/avatar_worker.py \
   --task s2v-14B \
-  --size "720*400" \
+  --size "${SIZE:-720*400}" \
   --ckpt_dir "${CKPT_DIR:-ckpt/Wan2.2-S2V-14B/}" \
   --training_config "${TRAINING_CONFIG:-avatar/liveavatar/configs/s2v_causal_sft.yaml}" \
   --image "${REF_IMAGE}" \

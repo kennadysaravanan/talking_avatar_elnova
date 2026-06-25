@@ -229,11 +229,18 @@ def run(args, training_settings):
     # ----- rank 4 only: IPC + idle + the audio callback (seams #1 and #2) -----
     ipc = None
     idle_ring = None
+    audio_fifo = None
+    # Frame-locked A/V sync: the audio chunk pulled for a block produces frames that exit the
+    # pipeline a few blocks LATER. We FIFO-delay the pulled audio by this integer offset so it is
+    # echoed back paired with the frames it actually generated. Tune if lips lead/lag (small int).
+    AUDIO_OFFSET = int(os.environ.get("AVATAR_AUDIO_BLOCK_OFFSET", "2"))
     if is_vae_rank and args.bench_blocks == 0:
+        from collections import deque
         from ipc_worker import WorkerIPC
         from idle import IdleFrameRing, ambient_block
         ipc = WorkerIPC()
         idle_ring = IdleFrameRing(capacity=100)
+        audio_fifo = deque()
         _rng = np.random.default_rng(0)
 
         def get_audio_callback():
@@ -242,6 +249,10 @@ def run(args, training_settings):
             if chunk is None:
                 # idle / underflow -> silence (or faint noise per IDLE_AUDIO_MODE). constraint #3
                 chunk = ambient_block(n_block_samples, _rng)
+                voice16 = np.zeros(n_block_samples, dtype=np.int16)        # idle -> silent echo
+            else:
+                voice16 = np.clip(chunk * 32768.0, -32768, 32767).astype(np.int16)
+            audio_fifo.append(voice16)   # echoed back paired with this block's frames (offset)
             return chunk.astype(np.float32)
 
         # ATTACH THE HOOK. This is the line the engine has been calling but never defining.
@@ -284,11 +295,16 @@ def run(args, training_settings):
         if is_vae_rank and item is not None:
             frames = frames_from_yield(item)
             kind = "talk" if (ipc and ipc.talking) else "idle"
-            for f in frames:
+            # paired audio for THIS block (FIFO-delayed by AUDIO_OFFSET to match pipeline depth)
+            paired = None
+            if audio_fifo is not None and len(audio_fifo) > AUDIO_OFFSET:
+                paired = audio_fifo.popleft()
+            for fi, f in enumerate(frames):
                 if idle_ring is not None and kind == "idle":
                     idle_ring.add(f)
                 if ipc is not None:
-                    ipc.push_frame(f, kind)
+                    # attach the block's audio to its FIRST frame only
+                    ipc.push_frame(f, kind, audio=(paired if fi == 0 else None))
 
         if args.bench_blocks > 0:
             n_yields += 1

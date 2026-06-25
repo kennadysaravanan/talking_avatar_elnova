@@ -35,6 +35,7 @@ class Frame:
     seq: int
     kind: str         # "idle" | "talk"
     ts: float
+    audio: Optional[np.ndarray] = None  # int16 PCM that generated this block (first frame only)
 
 
 class OrchestratorIPC:
@@ -73,7 +74,10 @@ class OrchestratorIPC:
             return None
         hdr = json.loads(parts[1])
         rgb = np.frombuffer(parts[2], dtype=np.uint8).reshape(hdr["h"], hdr["w"], 3)
-        return Frame(rgb=rgb, seq=hdr["seq"], kind=hdr["kind"], ts=hdr["ts"])
+        audio = None
+        if hdr.get("asamples", 0) and len(parts) >= 4:
+            audio = np.frombuffer(parts[3], dtype="<i2").copy()
+        return Frame(rgb=rgb, seq=hdr["seq"], kind=hdr["kind"], ts=hdr["ts"], audio=audio)
 
     def close(self) -> None:
         self._audio.close(0)

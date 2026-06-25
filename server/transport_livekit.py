@@ -31,6 +31,9 @@ logger = logging.getLogger("transport")
 PUBLISH_FPS = int(os.environ.get("AVATAR_PUBLISH_FPS", "25"))
 JITTER_FRAMES = int(os.environ.get("AVATAR_JITTER_FRAMES", "6"))  # small cushion
 VOICE_SAMPLE_RATE = 16000  # TTS PCM rate published to the LiveKit voice track
+# Audio leads the video because the voice is published instantly while the talking frames take
+# time to generate. Delay the voice by this much to line lips up with sound. TUNE on the pod.
+AUDIO_DELAY_S = float(os.environ.get("AVATAR_AUDIO_DELAY_MS", "1200")) / 1000.0
 
 
 def _rgb_to_rgba(rgb: np.ndarray) -> bytes:
@@ -89,21 +92,19 @@ class LiveKitPublisher:
         self._tasks.append(asyncio.create_task(self._ingest_loop(), name="lk-ingest"))
         self._tasks.append(asyncio.create_task(self._publish_loop(), name="lk-publish"))
 
-    async def play_voice(self, pcm16: np.ndarray) -> None:
-        """Publish a chunk of TTS audio (int16 mono 16kHz) to the LiveKit voice track so the
-        user hears it. Called from the turn manager alongside feeding the worker."""
+    async def _capture_audio(self, pcm16: np.ndarray) -> None:
+        """Capture one block's PCM (int16 mono 16kHz) to the voice track, IN LOCKSTEP with the
+        video frame it is attached to -> frame-locked A/V sync (no drift, no manual ms delay)."""
         if self._audio_source is None:
             return
         try:
             frame = rtc.AudioFrame(
-                data=pcm16.tobytes(),
-                sample_rate=VOICE_SAMPLE_RATE,
-                num_channels=1,
-                samples_per_channel=int(pcm16.shape[0]),
+                data=pcm16.tobytes(), sample_rate=VOICE_SAMPLE_RATE,
+                num_channels=1, samples_per_channel=int(pcm16.shape[0]),
             )
             await self._audio_source.capture_frame(frame)
-        except Exception:  # noqa: BLE001 — never let audio publish break a turn
-            logger.exception("play_voice failed")
+        except Exception:  # noqa: BLE001 — never let audio publish break the video loop
+            logger.exception("audio capture failed")
 
     async def _ensure_source(self, w: int, h: int) -> None:
         """Create the VideoSource + track sized to the ACTUAL frame, and publish it."""
@@ -147,7 +148,11 @@ class LiveKitPublisher:
         next_t = loop.time()
         while not self._stop.is_set():
             if self._ring:
-                self._last_rgb = self._ring.popleft().rgb
+                fr = self._ring.popleft()
+                self._last_rgb = fr.rgb
+                # play this block's paired audio exactly as its first frame is published
+                if fr.audio is not None and fr.audio.shape[0] > 0:
+                    await self._capture_audio(fr.audio)
             if self._last_rgb is not None:
                 h, w = self._last_rgb.shape[:2]              # ACTUAL frame dims
                 await self._ensure_source(w, h)             # create source/track on first frame
