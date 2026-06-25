@@ -12,8 +12,11 @@
     input, button { font-size:15px; }
     .api { width:100%; padding:8px; margin:6px 0 14px; border-radius:8px;
            border:1px solid #333; background:#15181c; color:#e8eaed; }
-    .stage { position:relative; aspect-ratio:720/400; background:#000; border-radius:12px; overflow:hidden; }
-    video { width:100%; height:100%; object-fit:cover; }
+    /* contain (not cover) so the FULL avatar shows — no crop. Box adapts to the video aspect
+       (portrait full-body or landscape head-shot both fit). */
+    .stage { position:relative; width:100%; max-height:78vh; background:#000; border-radius:12px;
+             overflow:hidden; display:flex; align-items:center; justify-content:center; }
+    video { max-width:100%; max-height:78vh; object-fit:contain; }
     .overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
                background:rgba(0,0,0,.6); font-size:18px; }
     .row { display:flex; gap:8px; margin-top:14px; }
@@ -74,8 +77,13 @@
           if (track.kind === LK.Track.Kind.Video) {
             track.attach($("video")); log("Video track attached ✅"); $("overlay").style.display="none";
           } else if (track.kind === LK.Track.Kind.Audio) {
-            const el = track.attach(); el.autoplay = true; document.body.appendChild(el);
-            log("Audio track attached 🔊");
+            const el = track.attach(); el.autoplay = true; el.volume = 1.0;
+            document.body.appendChild(el);
+            // browsers may block autoplay until a gesture — try, and fall back to click-to-play
+            const tryPlay = () => el.play().catch(() => {});
+            tryPlay();
+            document.body.addEventListener("click", tryPlay, { once: true });
+            log("Audio track attached 🔊 (if silent, click the page once)");
           }
         });
         await room.connect(info.livekit_url, info.viewer_token);
