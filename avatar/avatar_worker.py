@@ -254,57 +254,93 @@ def run(args, training_settings):
         wan.get_audio_callback = lambda: ambient_block(n_block_samples)
 
     warmup_audio = make_silent_wav(6.0)
+    local_rank = int(os.getenv("LOCAL_RANK", 0))
 
-    gen = wan.generate(
-        input_prompt=args.prompt,
-        ref_image_path=args.image,
-        audio_path=warmup_audio,           # template for rounds r<2 only; r>=2 uses the callback
-        enable_tts=False,
-        num_repeat=1,
-        pose_video=None,
-        generate_size=args.size,
-        max_area=MAX_AREA_CONFIGS[args.size],
-        infer_frames=args.infer_frames,
-        shift=args.sample_shift,
-        sample_solver=args.sample_solver,
-        sampling_steps=args.sample_steps,
-        guide_scale=args.sample_guide_scale,
-        seed=args.base_seed,
-        offload_model=False,
-        init_first_frame=args.start_from_ref,
-        drop_motion_noisy=False,
-        num_gpus_dit=args.num_gpus_dit,
-        enable_vae_parallel=args.enable_vae_parallel,
-        input_video_for_sam2=None,
-        enable_online_decode=args.enable_online_decode,
-    )
+    # ----- hot ref-image swap (live mode only) -----
+    # When the orchestrator uploads a new photo it sends a "REF <path>" control message. The VAE
+    # rank picks it up; at the next round boundary ALL ranks agree (via a dist.broadcast) to exit
+    # generate() and re-enter it with the new reference image — reusing the loaded+compiled model
+    # (no 10-min reload; ~seconds). The engine hook is causal_s2v_pipeline_tpp_blockwise.py
+    # `_hotswap_check`. Same-pod filesystem path is shared via REF_SIGNAL so every rank reads it.
+    REF_SIGNAL = "/tmp/avatar_next_ref.txt"
+    if args.bench_blocks == 0:
+        def _hotswap_check(r):
+            flag = torch.zeros(1, dtype=torch.int32, device=f"cuda:{local_rank}")
+            if is_vae_rank and ipc is not None:
+                p = ipc.get_pending_ref()
+                if p:
+                    try:
+                        with open(REF_SIGNAL, "w") as fh:
+                            fh.write(p)
+                        flag[0] = 1
+                    except OSError:
+                        pass
+            dist.broadcast(flag, src=args.num_gpus_dit)   # src = VAE rank (== num_gpus_dit)
+            if int(flag.item()) == 1:
+                try:
+                    with open(REF_SIGNAL) as fh:
+                        wan._next_ref = fh.read().strip()
+                    return True
+                except OSError:
+                    return False
+            return False
+        wan._hotswap_check = _hotswap_check
 
-    # Iterate the generator forever. DiT ranks yield None; rank 4 yields frame tensors.
+    def make_gen(ref_path):
+        return wan.generate(
+            input_prompt=args.prompt,
+            ref_image_path=ref_path,
+            audio_path=warmup_audio,       # template for rounds r<2 only; r>=2 uses the callback
+            enable_tts=False, num_repeat=1, pose_video=None,
+            generate_size=args.size, max_area=MAX_AREA_CONFIGS[args.size],
+            infer_frames=args.infer_frames, shift=args.sample_shift,
+            sample_solver=args.sample_solver, sampling_steps=args.sample_steps,
+            guide_scale=args.sample_guide_scale, seed=args.base_seed,
+            offload_model=False, init_first_frame=args.start_from_ref, drop_motion_noisy=False,
+            num_gpus_dit=args.num_gpus_dit, enable_vae_parallel=args.enable_vae_parallel,
+            input_video_for_sam2=None, enable_online_decode=args.enable_online_decode,
+        )
+
+    # OUTER loop: each generate() runs until a hot-swap (or, in bench, until N blocks). DiT ranks
+    # yield None; rank 4 yields frame tensors.
     block_times = []
     last = time.time()
     n_yields = 0
-    for item in gen:
-        now = time.time()
-        dt = now - last
-        last = now
+    current_ref = args.image
+    stop = False
+    while not stop:
+        bench_done = False
+        for item in make_gen(current_ref):
+            now = time.time(); dt = now - last; last = now
 
-        if is_vae_rank and item is not None:
-            frames = frames_from_yield(item)
-            kind = "talk" if (ipc and ipc.talking) else "idle"
-            for f in frames:
-                if idle_ring is not None and kind == "idle":
-                    idle_ring.add(f)
-                if ipc is not None:
-                    ipc.push_frame(f, kind)
+            if is_vae_rank and item is not None:
+                frames = frames_from_yield(item)
+                kind = "talk" if (ipc and ipc.talking) else "idle"
+                for f in frames:
+                    if idle_ring is not None and kind == "idle":
+                        idle_ring.add(f)
+                    if ipc is not None:
+                        ipc.push_frame(f, kind)
 
-        if args.bench_blocks > 0:
-            # Skip the first few (compile warm-up) then record. constraint #1 / #4.
-            n_yields += 1
-            if n_yields > 3:
-                block_times.append(dt)
-            if len(block_times) >= args.bench_blocks:
-                _report_bench(block_times, n_block_samples, wan.num_frames_per_block, cfg.sample_fps)
-                break
+            if args.bench_blocks > 0:
+                n_yields += 1
+                if n_yields > 3:
+                    block_times.append(dt)
+                if len(block_times) >= args.bench_blocks:
+                    _report_bench(block_times, n_block_samples, wan.num_frames_per_block, cfg.sample_fps)
+                    bench_done = True
+                    break
+        if bench_done:
+            break
+        # generate() returned -> hot-swap requested (or unexpected end)
+        nxt = getattr(wan, "_next_ref", None)
+        if nxt:
+            current_ref = nxt
+            wan._next_ref = None
+            last = time.time()
+            logger.info("hot-swap: avatar reference image -> %s", current_ref)
+        else:
+            stop = True
 
     if ipc is not None:
         ipc.close()

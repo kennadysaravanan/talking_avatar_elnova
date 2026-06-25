@@ -68,6 +68,9 @@ async def create_session(photo: UploadFile = File(...)):
     logger.info("stored reference photo -> %s", path)
 
     session = await manager.create(path)
+    # Hot-swap the worker's avatar identity to THIS uploaded photo (same-pod path; the worker
+    # reuses its already-loaded+compiled model and re-derives ref/motion latents — no reload).
+    await session.ipc.send_ref(path)
     ok = await session.warm_up()
     if not ok:
         await manager.destroy()

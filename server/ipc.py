@@ -62,6 +62,10 @@ class OrchestratorIPC:
     async def flush(self) -> None:
         await self.send_control("FLUSH")
 
+    async def send_ref(self, path: str) -> None:
+        """Tell the worker to hot-swap its reference image to `path` (a same-pod filesystem path)."""
+        await self._audio.send_multipart([b"REF", path.encode()])
+
     # ---- frames in (worker -> orchestrator) ----
     async def recv_frame(self) -> Optional[Frame]:
         parts = await self._frame.recv_multipart()

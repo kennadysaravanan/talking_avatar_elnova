@@ -79,6 +79,7 @@ class WorkerIPC:
         self._pcm_lock = threading.Lock()
 
         self._talking = False          # set True between TALK_START and queue-drain
+        self._pending_ref = None       # new reference-image path (hot-swap), set by orchestrator
         self._frame_seq = 0
         self._stop = threading.Event()
 
@@ -116,6 +117,10 @@ class WorkerIPC:
                 self._talking = True
             elif mtype == b"IDLE":
                 self._talking = False
+            elif mtype == b"REF" and len(parts) >= 2:
+                # New reference image (same-pod filesystem path) -> hot-swap the avatar identity.
+                with self._pcm_lock:
+                    self._pending_ref = parts[1].decode()
 
     def drain_audio(self, n_samples: int) -> Optional[np.ndarray]:
         """Pop exactly `n_samples` of float32 PCM for one block, NON-BLOCKING.
@@ -140,6 +145,14 @@ class WorkerIPC:
     @property
     def talking(self) -> bool:
         return self._talking
+
+    def get_pending_ref(self) -> Optional[str]:
+        """Return-and-clear a pending hot-swap reference-image path (None if none). Used by the
+        VAE rank's hotswap check."""
+        with self._pcm_lock:
+            p = self._pending_ref
+            self._pending_ref = None
+            return p
 
     # ---------------------------------------------------------------- frames out
     def push_frame(self, rgb: np.ndarray, kind: str) -> None:

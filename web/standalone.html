@@ -71,7 +71,12 @@
 
         room = new LK.Room({ adaptiveStream:true });
         room.on(LK.RoomEvent.TrackSubscribed, (track) => {
-          if (track.kind === LK.Track.Kind.Video) { track.attach($("video")); log("Video track attached ✅"); $("overlay").style.display="none"; }
+          if (track.kind === LK.Track.Kind.Video) {
+            track.attach($("video")); log("Video track attached ✅"); $("overlay").style.display="none";
+          } else if (track.kind === LK.Track.Kind.Audio) {
+            const el = track.attach(); el.autoplay = true; document.body.appendChild(el);
+            log("Audio track attached 🔊");
+          }
         });
         await room.connect(info.livekit_url, info.viewer_token);
         log("Connected to LiveKit. Waiting for avatar frames…");

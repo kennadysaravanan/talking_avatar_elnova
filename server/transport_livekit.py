@@ -30,6 +30,7 @@ logger = logging.getLogger("transport")
 
 PUBLISH_FPS = int(os.environ.get("AVATAR_PUBLISH_FPS", "25"))
 JITTER_FRAMES = int(os.environ.get("AVATAR_JITTER_FRAMES", "6"))  # small cushion
+VOICE_SAMPLE_RATE = 16000  # TTS PCM rate published to the LiveKit voice track
 
 
 def _rgb_to_rgba(rgb: np.ndarray) -> bytes:
@@ -49,6 +50,7 @@ class LiveKitPublisher:
         self._identity = identity
         self._room: Optional[rtc.Room] = None
         self._source: Optional[rtc.VideoSource] = None
+        self._audio_source: Optional[rtc.AudioSource] = None  # avatar voice (TTS) -> user hears
         self._ring: deque[Frame] = deque(maxlen=max(JITTER_FRAMES * 4, 32))
         self._last_rgb: Optional[np.ndarray] = None
         self._prev_kind = "idle"
@@ -75,8 +77,33 @@ class LiveKitPublisher:
         # reference image aspect ratio (NOT the --size config), so hardcoding dims shears the image.
         self._room = rtc.Room()
         await self._room.connect(os.environ["LIVEKIT_URL"], self._token(self._room_name, self._identity))
+
+        # Audio track for the avatar's VOICE (TTS). The browser plays this so the user actually
+        # HEARS the avatar. 16kHz mono — same PCM we feed the worker for lip-sync.
+        self._audio_source = rtc.AudioSource(VOICE_SAMPLE_RATE, 1)
+        atrack = rtc.LocalAudioTrack.create_audio_track("voice", self._audio_source)
+        await self._room.local_participant.publish_track(
+            atrack, rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE)
+        )
+
         self._tasks.append(asyncio.create_task(self._ingest_loop(), name="lk-ingest"))
         self._tasks.append(asyncio.create_task(self._publish_loop(), name="lk-publish"))
+
+    async def play_voice(self, pcm16: np.ndarray) -> None:
+        """Publish a chunk of TTS audio (int16 mono 16kHz) to the LiveKit voice track so the
+        user hears it. Called from the turn manager alongside feeding the worker."""
+        if self._audio_source is None:
+            return
+        try:
+            frame = rtc.AudioFrame(
+                data=pcm16.tobytes(),
+                sample_rate=VOICE_SAMPLE_RATE,
+                num_channels=1,
+                samples_per_channel=int(pcm16.shape[0]),
+            )
+            await self._audio_source.capture_frame(frame)
+        except Exception:  # noqa: BLE001 — never let audio publish break a turn
+            logger.exception("play_voice failed")
 
     async def _ensure_source(self, w: int, h: int) -> None:
         """Create the VideoSource + track sized to the ACTUAL frame, and publish it."""

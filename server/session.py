@@ -77,7 +77,8 @@ class SessionManager:
             room = f"avatar-{sid}"
             ipc = OrchestratorIPC()
             publisher = LiveKitPublisher(ipc, room_name=room)
-            turns = TurnManager(ipc, OpenAILLM(), OpenAITTS())
+            # voice_sink -> publish TTS audio to LiveKit so the user HEARS the avatar
+            turns = TurnManager(ipc, OpenAILLM(), OpenAITTS(), voice_sink=publisher.play_voice)
             self._session = Session(
                 session_id=sid, ref_image_path=ref_image_path, ipc=ipc,
                 publisher=publisher, turns=turns, room_name=room,

@@ -799,6 +799,12 @@ class WanS2V:
             self.kv_cache1 = None
             active_nr = max_repeat
             for r in range(active_nr):
+                # LIVEAVATAR-FORK: hot ref-image swap. Called by ALL ranks at the round boundary
+                # (a synchronized point); it does a dist.broadcast internally so every rank agrees
+                # to restart together. Returning from this generator makes the worker re-call
+                # generate() with the new reference image — reusing the loaded+compiled model.
+                if getattr(self, '_hotswap_check', None) is not None and self._hotswap_check(r):
+                    return
             #-------------------------------------------rollout loop------------------------------------------------------
                 #----------------------------------------------Step 2.1: clip-level init------------------------------------------------------ 
 

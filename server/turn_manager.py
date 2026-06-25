@@ -35,10 +35,13 @@ _SENT_BOUNDARY = re.compile(r"[.!?。！？]\s|[.!?。！？]$|[,;，；]\s")
 
 
 class TurnManager:
-    def __init__(self, ipc: OrchestratorIPC, llm: LLMProvider, tts: TTSProvider):
+    def __init__(self, ipc: OrchestratorIPC, llm: LLMProvider, tts: TTSProvider, voice_sink=None):
         self._ipc = ipc
         self._llm = llm
         self._tts = tts
+        # voice_sink(pcm16) publishes the SAME TTS audio to LiveKit so the user hears it
+        # (the worker only uses it for lip-sync). Set to LiveKitPublisher.play_voice.
+        self._voice_sink = voice_sink
         self._task: Optional[asyncio.Task] = None
         self._history: list[dict] = []
         self._lock = asyncio.Lock()
@@ -102,6 +105,9 @@ class TurnManager:
                 await self._ipc.send_control("IDLE")
 
     async def _speak(self, text: str) -> None:
-        """Stream TTS for one sentence and push PCM into the AudioQueue."""
+        """Stream TTS for one sentence: feed the worker (lip-sync) AND publish to LiveKit (user hears)."""
         async for pcm16 in self._tts.stream_pcm(text):
-            await self._ipc.send_pcm16(np.ascontiguousarray(pcm16, dtype=np.int16))
+            pcm16 = np.ascontiguousarray(pcm16, dtype=np.int16)
+            await self._ipc.send_pcm16(pcm16)                 # worker: drives mouth motion
+            if self._voice_sink is not None:
+                await self._voice_sink(pcm16)                 # LiveKit: user hears the voice
